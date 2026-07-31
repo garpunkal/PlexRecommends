@@ -73,7 +73,7 @@ try {
 											class="h-full w-full object-cover"
 										/>
 									) : (
-										<div class="flex h-full min-h-72 items-center justify-center bg-gradient-to-br from-slate-700 via-slate-800 to-slate-950 text-sm font-medium text-slate-400 animate-pulse">
+										<div class="flex h-full min-h-72 items-center justify-center bg-linear-to-br from-slate-700 via-slate-800 to-slate-950 text-sm font-medium text-slate-400 animate-pulse">
 											No artist artwork
 										</div>
 									)
@@ -93,10 +93,29 @@ try {
 										Plex library artist
 									</span>
 								</div>
-								<p class="mt-6 max-w-3xl text-sm leading-7 text-slate-300">
-									{artist.summary ??
-										'Explore this artist, inspect their Plex albums, and compare recommendation signals from all configured sources.'}
-								</p>
+								{(() => {
+									const text = artist.summary ?? 'Explore this artist, inspect their Plex albums, and compare recommendation signals from all configured sources.';
+									const LIMIT = 280;
+									const needsTruncation = text.length > LIMIT;
+									const truncated = needsTruncation ? text.slice(0, text.lastIndexOf(' ', LIMIT)) : text;
+
+									return needsTruncation ? (
+										<div data-summary class="mt-6 max-w-3xl">
+											<p class="text-sm leading-7 text-slate-300">
+												<span data-summary-short>{truncated}&hellip;</span>
+												<span data-summary-full class="hidden">{text}</span>
+											</p>
+											<button
+												data-summary-toggle
+												class="mt-2 text-xs font-semibold text-[#f4c561] transition hover:text-white"
+											>
+												Show more
+											</button>
+										</div>
+									) : (
+										<p class="mt-6 max-w-3xl text-sm leading-7 text-slate-300">{text}</p>
+									);
+								})()}
 							</div>
 						</div>
 					</section>
@@ -138,3 +157,20 @@ try {
 		)
 	}
 </BaseLayout>
+
+<script>
+	document.querySelectorAll<HTMLElement>('[data-summary]').forEach((root) => {
+		const short = root.querySelector('[data-summary-short]');
+		const full = root.querySelector('[data-summary-full]');
+		const toggle = root.querySelector<HTMLButtonElement>('[data-summary-toggle]');
+
+		if (!short || !full || !toggle) return;
+
+		toggle.addEventListener('click', () => {
+			const expanded = !full.classList.contains('hidden');
+			full.classList.toggle('hidden', expanded);
+			short.classList.toggle('hidden', !expanded);
+			toggle.textContent = expanded ? 'Show more' : 'Show less';
+		});
+	});
+</script>
