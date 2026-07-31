@@ -1,0 +1,203 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import RecommendationPanel from '../../components/RecommendationPanel.astro';
+import { getAlbum, getAlbumTracks } from '../../lib/plex';
+import { getAlbumInfo, getAlbumRecommendations } from '../../lib/recommendations';
+import type { PlexAlbum, PlexTrack } from '../../types/plex';
+import type { AlbumRecommendation } from '../../types/recommendations';
+
+const albumId = Astro.params.id;
+
+if (!albumId) {
+	throw new Error('Album id is required.');
+}
+
+let album: PlexAlbum | null = null;
+let tracks: PlexTrack[] = [];
+let recommendations: AlbumRecommendation[] = [];
+let derivedTags: string[] = [];
+let errorMessage: string | null = null;
+let recommendationError: string | null = null;
+
+function formatDuration(durationMs?: number) {
+	if (!durationMs) {
+		return '--:--';
+	}
+
+	const totalSeconds = Math.floor(durationMs / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+try {
+	const [albumRecord, trackRecords] = await Promise.all([getAlbum(albumId), getAlbumTracks(albumId)]);
+	album = albumRecord;
+	tracks = trackRecords;
+
+	const [recommendationResult, lastFmInfoResult] = await Promise.allSettled([
+		getAlbumRecommendations(albumRecord),
+		getAlbumInfo(albumRecord.artistName, albumRecord.title),
+	]);
+
+	if (recommendationResult.status === 'fulfilled') {
+		recommendations = recommendationResult.value;
+	} else {
+		recommendationError =
+			recommendationResult.reason instanceof Error
+				? recommendationResult.reason.message
+				: 'Unable to load album recommendations.';
+	}
+
+	if (lastFmInfoResult.status === 'fulfilled') {
+		if (!album.thumbUrl && lastFmInfoResult.value.imageUrl) {
+			album = {
+				...album,
+				thumbUrl: lastFmInfoResult.value.imageUrl,
+			};
+		}
+
+		derivedTags = lastFmInfoResult.value.tags;
+	}
+} catch (error) {
+	errorMessage = error instanceof Error ? error.message : 'Unable to load this album from Plex.';
+	Astro.response.status = 500;
+}
+---
+
+<BaseLayout
+	title={album ? `${album.title} | PlexRecommends` : 'Album | PlexRecommends'}
+	description={album ? `Browse ${album.title} by ${album.artistName}.` : 'Album details'}
+>
+	{
+		errorMessage || !album ? (
+			<section class="rounded-3xl border border-rose-400/30 bg-rose-400/10 p-8 text-rose-100">
+				<h1 class="text-2xl font-semibold">Album unavailable</h1>
+				<p class="mt-3 text-sm leading-6 text-rose-100/90">{errorMessage}</p>
+			</section>
+		) : (
+			<div class="grid gap-8 xl:grid-cols-[minmax(0,1.7fr)_24rem]">
+				<div>
+					<section class="rounded-3xl border border-white/10 bg-slate-800/80 p-8 shadow-2xl shadow-black/20">
+						<div class="grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
+							<div class="overflow-hidden rounded-3xl border border-white/10 bg-slate-900">
+								{
+									album.thumbUrl ? (
+										<img src={album.thumbUrl} alt={`${album.title} cover art`} class="h-full w-full object-cover" />
+									) : (
+										<div class="flex aspect-square items-center justify-center bg-gradient-to-br from-slate-700 via-slate-800 to-slate-950 text-sm font-medium text-slate-400 animate-pulse">
+											No cover art
+										</div>
+									)
+								}
+							</div>
+
+							<div>
+								<a
+									href={`/artist/${encodeURIComponent(album.artistId)}`}
+									class="text-sm font-medium text-[#f4c561] transition hover:text-white"
+								>
+									← Back to artist
+								</a>
+								<h1 class="mt-4 text-4xl font-semibold tracking-tight text-white">{album.title}</h1>
+								<p class="mt-2 text-lg text-slate-300">{album.artistName}</p>
+
+								<div class="mt-5 flex flex-wrap gap-3">
+									<span class="rounded-full border border-[#e5a00d]/20 bg-[#e5a00d]/10 px-3 py-1 text-sm font-medium text-[#f4c561]">
+										{album.trackCount} {album.trackCount === 1 ? 'track' : 'tracks'}
+									</span>
+									{
+										album.year ? (
+											<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-medium text-slate-300">
+												Released {album.year}
+											</span>
+										) : null
+									}
+									{
+										album.originallyAvailableAt ? (
+											<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-medium text-slate-300">
+												{album.originallyAvailableAt}
+											</span>
+										) : null
+									}
+								</div>
+
+								<p class="mt-6 text-sm leading-7 text-slate-300">
+									{album.summary ??
+										'Inspect the track list below, then compare recommendations gathered from Last.fm tags and MusicBrainz artist relationships.'}
+								</p>
+
+								<div class="mt-6 flex flex-wrap gap-2">
+									{album.genres.map((genre) => (
+										<span class="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-200">
+											{genre}
+										</span>
+									))}
+									{
+										derivedTags
+											.filter((tag) => !album.genres.includes(tag))
+											.slice(0, 4)
+											.map((tag) => (
+												<span class="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-200">
+													{tag}
+												</span>
+											))
+									}
+								</div>
+							</div>
+						</div>
+					</section>
+
+					<section class="mt-8 rounded-3xl border border-white/10 bg-slate-800/80 p-6">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<h2 class="text-2xl font-semibold text-white">Track list</h2>
+								<p class="mt-1 text-sm text-slate-400">
+									Loaded from <code class="rounded bg-white/5 px-2 py-1">/library/metadata/{album.id}/children</code>.
+								</p>
+							</div>
+						</div>
+
+						<div class="mt-6 overflow-hidden rounded-2xl border border-white/10">
+							<table class="min-w-full divide-y divide-white/10">
+								<thead class="bg-slate-900/70">
+									<tr class="text-left text-xs uppercase tracking-[0.22em] text-slate-400">
+										<th class="px-4 py-3 font-medium">#</th>
+										<th class="px-4 py-3 font-medium">Track</th>
+										<th class="px-4 py-3 font-medium">Disc</th>
+										<th class="px-4 py-3 font-medium text-right">Length</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-white/10 bg-slate-950/40 text-sm text-slate-200">
+									{
+										tracks.map((track) => (
+											<tr class="transition hover:bg-white/5">
+												<td class="px-4 py-3 text-slate-400">{track.index}</td>
+												<td class="px-4 py-3 font-medium text-white">{track.title}</td>
+												<td class="px-4 py-3 text-slate-400">{track.parentIndex ?? 1}</td>
+												<td class="px-4 py-3 text-right text-slate-300">
+													{formatDuration(track.durationMs)}
+												</td>
+											</tr>
+										))
+									}
+								</tbody>
+							</table>
+						</div>
+					</section>
+				</div>
+
+				<div class="xl:sticky xl:top-24 xl:self-start">
+					<RecommendationPanel
+						title={`Albums related to ${album.title}`}
+						items={recommendations}
+						errorMessage={recommendationError ?? undefined}
+						emptyMessage="No related album suggestions were returned from Last.fm tags or MusicBrainz."
+					/>
+				</div>
+			</div>
+		)
+	}
+</BaseLayout>

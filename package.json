@@ -1,0 +1,29 @@
+{
+  "name": "plexrecommends",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "A Plex-powered music recommendation dashboard built with Astro, Tailwind CSS, and TypeScript.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "astro": "astro",
+    "start": "node dist/server/entry.mjs"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.0.3",
+    "@tailwindcss/vite": "^4.1.12",
+    "astro": "^7.1.6",
+    "fast-xml-parser": "^5.2.5",
+    "tailwindcss": "^4.1.12"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^6.0.3"
+  }
+}

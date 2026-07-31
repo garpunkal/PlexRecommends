@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+:root {
+	color-scheme: dark;
+}
+
+body {
+	background:
+		radial-gradient(circle at top, rgba(229, 160, 13, 0.12), transparent 28%),
+		linear-gradient(180deg, rgba(15, 23, 42, 1) 0%, rgba(2, 6, 23, 1) 100%);
+}
+
+::selection {
+	background: rgba(229, 160, 13, 0.32);
+	color: white;
+}
+
+code {
+	font-family:
+		"SFMono-Regular",
+		Consolas,
+		"Liberation Mono",
+		Menlo,
+		monospace;
+}

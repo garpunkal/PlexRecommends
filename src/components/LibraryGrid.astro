@@ -1,0 +1,107 @@
+---
+import ArtistCard from './ArtistCard.astro';
+import type { PlexArtist } from '../types/plex';
+
+interface Props {
+	artists: PlexArtist[];
+}
+
+const { artists } = Astro.props as Props;
+---
+
+<section data-library-root>
+	<div class="mb-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-800/80 p-5 lg:flex-row lg:items-center lg:justify-between">
+		<div>
+			<h2 class="text-2xl font-semibold text-white">Your artists</h2>
+			<p class="mt-1 text-sm text-slate-400">
+				Filter the library client-side, then open an artist to view albums and recommendations.
+			</p>
+		</div>
+
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+			<label class="relative block min-w-72">
+				<span class="sr-only">Search artists</span>
+				<input
+					type="search"
+					placeholder="Search artists..."
+					data-library-filter
+					class="w-full rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#e5a00d]/50 focus:ring-2 focus:ring-[#e5a00d]/20"
+				/>
+			</label>
+			<p data-library-count class="text-sm font-medium text-slate-300">
+				{artists.length} {artists.length === 1 ? 'artist' : 'artists'}
+			</p>
+		</div>
+	</div>
+
+	<div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+		{
+			artists.map((artist) => (
+				<div data-artist-card data-artist-name={artist.name.toLocaleLowerCase()}>
+					<ArtistCard artist={artist} />
+				</div>
+			))
+		}
+	</div>
+
+	<p
+		data-library-empty
+		class="mt-6 hidden rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-5 text-sm leading-6 text-slate-400"
+	>
+		No artists match the current filter.
+	</p>
+</section>
+
+<script>
+	const setupLibraryFilter = () => {
+		const root = document.querySelector('[data-library-root]');
+
+		if (!root) {
+			return;
+		}
+
+		const input = root.querySelector('[data-library-filter]');
+		const cards = Array.from(root.querySelectorAll('[data-artist-card]'));
+		const counter = root.querySelector('[data-library-count]');
+		const emptyState = root.querySelector('[data-library-empty]');
+
+		if (!(input instanceof HTMLInputElement)) {
+			return;
+		}
+
+		const update = () => {
+			const query = input.value.trim().toLocaleLowerCase();
+			let visibleCount = 0;
+
+			for (const card of cards) {
+				if (!(card instanceof HTMLElement)) {
+					continue;
+				}
+
+				const matches = (card.dataset.artistName ?? '').includes(query);
+				card.classList.toggle('hidden', !matches);
+
+				if (matches) {
+					visibleCount += 1;
+				}
+			}
+
+			if (counter) {
+				counter.textContent = `${visibleCount} ${visibleCount === 1 ? 'artist' : 'artists'}`;
+			}
+
+			if (emptyState instanceof HTMLElement) {
+				emptyState.classList.toggle('hidden', visibleCount > 0);
+			}
+		};
+
+		input.addEventListener('input', update);
+		update();
+	};
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', setupLibraryFilter, { once: true });
+	} else {
+		setupLibraryFilter();
+	}
+</script>

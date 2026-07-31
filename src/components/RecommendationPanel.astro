@@ -1,0 +1,127 @@
+---
+import type {
+	AlbumRecommendation,
+	ArtistRecommendation,
+	RecommendationItem,
+	RecommendationSource,
+} from '../types/recommendations';
+
+interface Props {
+	title: string;
+	items: RecommendationItem[];
+	emptyMessage?: string;
+	errorMessage?: string;
+}
+
+const props = Astro.props as Props;
+const items = props.items;
+const sourceLabels: Record<RecommendationSource, string> = {
+	lastfm: 'Last.fm',
+	musicbrainz: 'MusicBrainz',
+	spotify: 'Spotify',
+};
+
+function isArtistRecommendation(item: RecommendationItem): item is ArtistRecommendation {
+	return item.kind === 'artist';
+}
+
+function isAlbumRecommendation(item: RecommendationItem): item is AlbumRecommendation {
+	return item.kind === 'album';
+}
+
+function formatScore(score: number) {
+	return score >= 10 ? score.toFixed(1) : score.toFixed(0);
+}
+---
+
+<aside class="rounded-3xl border border-white/10 bg-slate-800/80 p-6 shadow-xl shadow-black/10">
+	<div class="flex items-center justify-between gap-3">
+		<div>
+			<p class="text-xs font-semibold uppercase tracking-[0.24em] text-[#f4c561]">Recommendations</p>
+			<h2 class="mt-2 text-xl font-semibold text-white">{props.title}</h2>
+		</div>
+		<div class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
+			Top {items.length}
+		</div>
+	</div>
+
+	{
+		props.errorMessage ? (
+			<div class="mt-5 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 text-sm leading-6 text-rose-100">
+				{props.errorMessage}
+			</div>
+		) : items.length === 0 ? (
+			<div class="mt-5 rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-5 text-sm leading-6 text-slate-400">
+				{props.emptyMessage ?? 'No recommendation matches were found for this item yet.'}
+			</div>
+		) : (
+			<ol class="mt-5 space-y-3">
+				{
+					items.map((item, index) => (
+						<li class="rounded-2xl border border-white/10 bg-slate-900/40 p-4 transition hover:border-[#e5a00d]/40 hover:bg-slate-900/70">
+							<div class="flex gap-4">
+								<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-800 text-sm font-semibold text-slate-200">
+									{index + 1}
+								</div>
+
+								<div class="min-w-0 flex-1">
+									<div class="flex items-start justify-between gap-3">
+										<div class="min-w-0">
+											{
+												isArtistRecommendation(item) ? (
+													item.plexArtistId ? (
+														<a
+															href={`/artist/${encodeURIComponent(item.plexArtistId)}`}
+															class="truncate text-base font-semibold text-white transition hover:text-[#f4c561]"
+														>
+															{item.name}
+														</a>
+													) : (
+														<p class="truncate text-base font-semibold text-white">{item.name}</p>
+													)
+												) : isAlbumRecommendation(item) ? (
+													<p class="truncate text-base font-semibold text-white">{item.title}</p>
+												) : null
+											}
+
+											<p class="mt-1 text-sm text-slate-400">
+												{
+													isArtistRecommendation(item)
+														? item.plexArtistId
+															? 'Available in your Plex library'
+															: 'Not currently in your Plex library'
+														: item.artistName
+												}
+											</p>
+										</div>
+
+										<div class="rounded-full border border-[#e5a00d]/20 bg-[#e5a00d]/10 px-2.5 py-1 text-xs font-medium text-[#f4c561]">
+											Score {formatScore(item.score)}
+										</div>
+									</div>
+
+									<div class="mt-3 flex flex-wrap gap-2">
+										{
+											item.sources.map((source) => (
+												<span class="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-200">
+													{sourceLabels[source]}
+												</span>
+											))
+										}
+										{
+											item.tags.slice(0, 2).map((tag) => (
+												<span class="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-200">
+													{tag}
+												</span>
+											))
+										}
+									</div>
+								</div>
+							</div>
+						</li>
+					))
+				}
+			</ol>
+		)
+	}
+</aside>

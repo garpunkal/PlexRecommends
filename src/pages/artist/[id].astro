@@ -1,0 +1,137 @@
+---
+export const prerender = false;
+
+import AlbumCard from '../../components/AlbumCard.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import RecommendationPanel from '../../components/RecommendationPanel.astro';
+import { getArtist, getArtistAlbums, getAllArtists } from '../../lib/plex';
+import { getArtistRecommendations } from '../../lib/recommendations';
+import type { PlexAlbum, PlexArtist } from '../../types/plex';
+import type { ArtistRecommendation } from '../../types/recommendations';
+
+const artistId = Astro.params.id;
+
+if (!artistId) {
+	throw new Error('Artist id is required.');
+}
+
+let artist: PlexArtist | null = null;
+let albums: PlexAlbum[] = [];
+let recommendations: ArtistRecommendation[] = [];
+let errorMessage: string | null = null;
+let recommendationError: string | null = null;
+
+try {
+	const [artistRecord, albumRecords, libraryArtists] = await Promise.all([
+		getArtist(artistId),
+		getArtistAlbums(artistId),
+		getAllArtists(),
+	]);
+
+	artist = artistRecord;
+	albums = albumRecords;
+
+	try {
+		recommendations = await getArtistRecommendations(artistRecord, libraryArtists);
+	} catch (error) {
+		recommendationError =
+			error instanceof Error ? error.message : 'Unable to load artist recommendations.';
+	}
+} catch (error) {
+	errorMessage = error instanceof Error ? error.message : 'Unable to load this artist from Plex.';
+	Astro.response.status = 500;
+}
+---
+
+<BaseLayout
+	title={artist ? `${artist.name} | PlexRecommends` : 'Artist | PlexRecommends'}
+	description={
+		artist
+			? `Browse ${artist.name} in Plex and inspect related artist recommendations.`
+			: 'Artist details'
+	}
+>
+	{
+		errorMessage || !artist ? (
+			<section class="rounded-3xl border border-rose-400/30 bg-rose-400/10 p-8 text-rose-100">
+				<h1 class="text-2xl font-semibold">Artist unavailable</h1>
+				<p class="mt-3 text-sm leading-6 text-rose-100/90">{errorMessage}</p>
+			</section>
+		) : (
+			<div class="grid gap-8 xl:grid-cols-[minmax(0,1.7fr)_24rem]">
+				<div>
+					<section class="overflow-hidden rounded-3xl border border-white/10 bg-slate-800/80 shadow-2xl shadow-black/20">
+						<div class="grid gap-0 lg:grid-cols-[18rem_minmax(0,1fr)]">
+							<div class="min-h-full bg-slate-900">
+								{
+									artist.thumbUrl ? (
+										<img
+											src={artist.thumbUrl}
+											alt={`${artist.name} artwork`}
+											class="h-full w-full object-cover"
+										/>
+									) : (
+										<div class="flex h-full min-h-72 items-center justify-center bg-gradient-to-br from-slate-700 via-slate-800 to-slate-950 text-sm font-medium text-slate-400 animate-pulse">
+											No artist artwork
+										</div>
+									)
+								}
+							</div>
+
+							<div class="p-8">
+								<a href="/" class="text-sm font-medium text-[#f4c561] transition hover:text-white">
+									← Back to library
+								</a>
+								<h1 class="mt-4 text-4xl font-semibold tracking-tight text-white">{artist.name}</h1>
+								<div class="mt-4 flex flex-wrap gap-3">
+									<span class="rounded-full border border-[#e5a00d]/20 bg-[#e5a00d]/10 px-3 py-1 text-sm font-medium text-[#f4c561]">
+										{albums.length} {albums.length === 1 ? 'album' : 'albums'}
+									</span>
+									<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-medium text-slate-300">
+										Plex library artist
+									</span>
+								</div>
+								<p class="mt-6 max-w-3xl text-sm leading-7 text-slate-300">
+									{artist.summary ??
+										'Explore this artist, inspect their Plex albums, and compare recommendation signals from all configured sources.'}
+								</p>
+							</div>
+						</div>
+					</section>
+
+					<section class="mt-8">
+						<div class="mb-5 flex items-center justify-between gap-3">
+							<div>
+								<h2 class="text-2xl font-semibold text-white">Albums</h2>
+								<p class="mt-1 text-sm text-slate-400">
+									Directly loaded from <code class="rounded bg-white/5 px-2 py-1">/library/metadata/{artist.id}/children</code>.
+								</p>
+							</div>
+						</div>
+
+						{
+							albums.length === 0 ? (
+								<div class="rounded-3xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-sm leading-6 text-slate-400">
+									No albums were returned for this artist.
+								</div>
+							) : (
+								<div class="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">
+									{albums.map((album) => <AlbumCard album={album} />)}
+								</div>
+							)
+						}
+					</section>
+				</div>
+
+				<div class="xl:sticky xl:top-24 xl:self-start">
+					<RecommendationPanel
+						title={`Similar to ${artist.name}`}
+						items={recommendations}
+						errorMessage={recommendationError ?? undefined}
+						emptyMessage="No recommendation overlap was found across the configured sources yet."
+					/>
+				</div>
+			</div>
+		)
+	}
+</BaseLayout>

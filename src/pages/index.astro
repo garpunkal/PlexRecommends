@@ -1,0 +1,74 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LibraryGrid from '../components/LibraryGrid.astro';
+import { getAllArtists } from '../lib/plex';
+import type { PlexArtist } from '../types/plex';
+
+let artists: PlexArtist[] = [];
+let errorMessage: string | null = null;
+
+try {
+	artists = await getAllArtists();
+} catch (error) {
+	errorMessage = error instanceof Error ? error.message : 'Unable to load your Plex library.';
+	Astro.response.status = 500;
+}
+
+const totalAlbums = artists.reduce((count, artist) => count + artist.albumCount, 0);
+---
+
+<BaseLayout
+	title="PlexRecommends"
+	description="Explore your Plex music library and discover related artists and albums from Last.fm, MusicBrainz, and Spotify."
+>
+	<section class="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(20rem,1fr)]">
+		<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-8 shadow-2xl shadow-black/20">
+			<p class="mb-3 inline-flex items-center gap-2 rounded-full border border-[#e5a00d]/30 bg-[#e5a00d]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[#f4c561]">
+				Local Plex music intelligence
+			</p>
+			<h1 class="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+				Turn your library into a recommendation engine.
+			</h1>
+			<p class="mt-4 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">
+				PlexRecommends reads your Plex music library server-side, cross-references Last.fm,
+				MusicBrainz, and Spotify, and helps you jump from artists you already love to the next
+				thing worth playing.
+			</p>
+		</div>
+
+		<div class="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+			<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-6">
+				<p class="text-sm font-medium uppercase tracking-[0.22em] text-slate-400">Artists</p>
+				<p class="mt-3 text-4xl font-semibold text-white">{artists.length}</p>
+				<p class="mt-2 text-sm text-slate-400">Loaded from your Plex music library.</p>
+			</div>
+			<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-6">
+				<p class="text-sm font-medium uppercase tracking-[0.22em] text-slate-400">Albums</p>
+				<p class="mt-3 text-4xl font-semibold text-white">{totalAlbums}</p>
+				<p class="mt-2 text-sm text-slate-400">Aggregated from artist album counts in Plex.</p>
+			</div>
+			<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-6">
+				<p class="text-sm font-medium uppercase tracking-[0.22em] text-slate-400">Sources</p>
+				<p class="mt-3 text-xl font-semibold text-white">Last.fm, MusicBrainz, Spotify</p>
+				<p class="mt-2 text-sm text-slate-400">Source badges make every recommendation traceable.</p>
+			</div>
+		</div>
+	</section>
+
+	{
+		errorMessage ? (
+			<section class="mt-8 rounded-3xl border border-rose-400/30 bg-rose-400/10 p-6 text-rose-100">
+				<h2 class="text-lg font-semibold">Plex connection problem</h2>
+				<p class="mt-2 text-sm leading-6 text-rose-100/90">{errorMessage}</p>
+				<p class="mt-3 text-sm text-rose-100/80">
+					Check your <code class="rounded bg-black/20 px-2 py-1">PLEX_URL</code> and{' '}
+					<code class="rounded bg-black/20 px-2 py-1">PLEX_TOKEN</code> values and reload the page.
+				</p>
+			</section>
+		) : (
+			<section class="mt-10">
+				<LibraryGrid artists={artists} />
+			</section>
+		)
+	}
+</BaseLayout>

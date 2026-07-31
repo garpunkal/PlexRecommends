@@ -1,0 +1,30 @@
+---
+import Header from '../components/Header.astro';
+import '../styles/global.css';
+
+interface Props {
+	title: string;
+	description?: string;
+}
+
+const { title, description = 'Plex-powered music recommendations.' } = Astro.props as Props;
+---
+
+<!doctype html>
+<html lang="en" class="bg-slate-950">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content={description} />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="icon" href="/favicon.ico" />
+		<title>{title}</title>
+	</head>
+	<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+		<Header />
+		<main class="mx-auto max-w-7xl px-6 py-8 sm:px-8 sm:py-10">
+			<slot />
+		</main>
+	</body>
+</html>

@@ -1,0 +1,67 @@
+---
+import type { PlexAlbum } from '../types/plex';
+
+interface Props {
+	album: PlexAlbum;
+	href?: string;
+}
+
+const props = Astro.props as Props;
+const album = props.album;
+const href = props.href ?? `/album/${encodeURIComponent(album.id)}`;
+const summary =
+	album.summary && album.summary.length > 120
+		? `${album.summary.slice(0, 117).trim()}...`
+		: album.summary;
+---
+
+<a
+	href={href}
+	class="group flex h-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-800/80 shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-[#e5a00d]/50 hover:shadow-2xl hover:shadow-[#e5a00d]/10"
+>
+	<div class="aspect-square overflow-hidden bg-slate-700/80">
+		{
+			album.thumbUrl ? (
+				<img
+					src={album.thumbUrl}
+					alt={`${album.title} cover art`}
+					loading="lazy"
+					class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+				/>
+			) : (
+				<div class="flex h-full items-center justify-center bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 text-center text-sm font-medium text-slate-400 animate-pulse">
+					No cover art
+				</div>
+			)
+		}
+	</div>
+
+	<div class="flex flex-1 flex-col gap-4 p-5">
+		<div>
+			<h3 class="text-lg font-semibold text-white transition group-hover:text-[#f4c561]">
+				{album.title}
+			</h3>
+			<p class="mt-1 text-sm text-slate-400">
+				{album.artistName}
+				{album.year ? ` • ${album.year}` : ''}
+			</p>
+		</div>
+
+		<div class="flex flex-wrap gap-2">
+			<span class="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-300">
+				{album.trackCount} {album.trackCount === 1 ? 'track' : 'tracks'}
+			</span>
+			{
+				album.genres.slice(0, 2).map((genre) => (
+					<span class="rounded-full border border-[#e5a00d]/20 bg-[#e5a00d]/10 px-2.5 py-1 text-xs font-medium text-[#f4c561]">
+						{genre}
+					</span>
+				))
+			}
+		</div>
+
+		<p class="text-sm leading-6 text-slate-300">
+			{summary ?? 'Open the album page for track details, metadata, and related discovery picks.'}
+		</p>
+	</div>
+</a>
