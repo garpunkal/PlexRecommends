@@ -283,7 +283,14 @@ function parseTrack(node: PlexNode): PlexTrack {
 	};
 }
 
+/** Module-level cache so every page request in the same server process reuses the section ID. */
+let cachedMusicSectionId: string | undefined;
+
 export async function getMusicSectionId(): Promise<string> {
+	if (cachedMusicSectionId) {
+		return cachedMusicSectionId;
+	}
+
 	const container = await fetchPlex('/library/sections');
 	const sections = toArray(container.Directory as PlexNode | PlexNode[]);
 	const musicSection = sections.find((section) => asString(section.type) === 'artist');
@@ -298,13 +305,22 @@ export async function getMusicSectionId(): Promise<string> {
 		throw new Error('Plex music library section is missing its key.');
 	}
 
+	cachedMusicSectionId = id;
 	return id;
 }
 
 export async function getAllArtists(): Promise<PlexArtist[]> {
 	const sectionId = await getMusicSectionId();
 	const container = await fetchPlex(`/library/sections/${sectionId}/all?type=8`);
-	const artists = toArray(container.Directory as PlexNode | PlexNode[]).map(parseArtist);
+	const artists = toArray(container.Directory as PlexNode | PlexNode[])
+		.map((node) => {
+			try {
+				return parseArtist(node);
+			} catch {
+				return null;
+			}
+		})
+		.filter((a): a is PlexArtist => a !== null);
 	return artists.sort((left, right) => left.name.localeCompare(right.name));
 }
 
@@ -348,18 +364,24 @@ export async function getArtistAlbums(
 	artistId: string,
 	knownArtistName?: string,
 ): Promise<GetArtistAlbumsResult> {
-	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
+	// Primary approach: query the music library section directly for albums
+	// belonging to this artist. This is more reliable than /children because
+	// the library index always populates parentRatingKey and parentTitle on
+	// every album node, regardless of Plex server version.
+	const sectionId = await getMusicSectionId();
+	const container = await fetchPlex(
+		`/library/sections/${sectionId}/all?type=9&parentRatingKey=${encodeURIComponent(artistId)}`,
+	);
 
-	// Build the best fallback we have for parentRatingKey and parentTitle.
-	// The container's own parentTitle / parentRatingKey are preferred; the
-	// caller-supplied values are the last resort.
+	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
+
+	// Build fallback parent fields from what we know — the section query nodes
+	// should already have parentRatingKey/parentTitle, but just in case.
 	const containerWithArtistFallback: PlexNode = {
 		...container,
 		parentRatingKey: asString(container.parentRatingKey) ?? artistId,
 		parentTitle: asText(container.parentTitle) ?? asText(container.title2) ?? knownArtistName,
 	};
-
-	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
 
 	const albums: PlexAlbum[] = [];
 	const parseErrors: string[] = [];
@@ -373,6 +395,29 @@ export async function getArtistAlbums(
 		} else {
 			skippedCount += 1;
 			parseErrors.push(result.error);
+		}
+	}
+
+	// Fallback: if the section query returned nothing, try the children endpoint.
+	if (albums.length === 0 && skippedCount === 0 && nodes.length === 0) {
+		const childContainer = await fetchPlex(
+			`/library/metadata/${encodeURIComponent(artistId)}/children`,
+		);
+		const { nodes: childNodes } = collectAlbumCandidateNodes(childContainer);
+		const childFallback: PlexNode = {
+			...childContainer,
+			parentRatingKey: asString(childContainer.parentRatingKey) ?? artistId,
+			parentTitle: asText(childContainer.parentTitle) ?? asText(childContainer.title2) ?? knownArtistName,
+		};
+
+		for (const node of childNodes) {
+			const result = safeParseAlbum(withContainerFallbacks(node, childFallback));
+			if (result.album) {
+				albums.push(result.album);
+			} else {
+				skippedCount += 1;
+				parseErrors.push(result.error);
+			}
 		}
 	}
 
