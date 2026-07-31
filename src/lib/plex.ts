@@ -318,15 +318,43 @@ export async function getArtist(artistId: string): Promise<PlexArtist> {
 	return parseArtist(artistNode);
 }
 
+/**
+ * Injects container-level parent attributes into a child node as fallback values.
+ *
+ * Plex often puts parentRatingKey / parentTitle (and grandparent equivalents) on
+ * the MediaContainer element rather than on each child node. Spreading them first
+ * means the node's own attributes always win when present.
+ */
+function withContainerFallbacks(node: PlexNode, container: PlexNode): PlexNode {
+	return {
+		// Container-level breadcrumb attributes as fallbacks.
+		parentRatingKey: container.parentRatingKey,
+		parentTitle: container.parentTitle,
+		grandparentRatingKey: container.grandparentRatingKey,
+		grandparentTitle: container.grandparentTitle,
+		// Node's own attributes take priority by spreading last.
+		...node,
+	};
+}
+
 export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbumsResult> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
+
+	// When child nodes are missing parentRatingKey / parentTitle, fall back to
+	// the container's own attributes (which carry the parent artist's info) or
+	// the artistId we already know.
+	const containerWithArtistFallback: PlexNode = {
+		...container,
+		parentRatingKey: asString(container.parentRatingKey) ?? artistId,
+	};
+
 	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
 
 	const albums: PlexAlbum[] = [];
 	let skippedCount = 0;
 
 	for (const node of nodes) {
-		const album = safeParseAlbum(node);
+		const album = safeParseAlbum(withContainerFallbacks(node, containerWithArtistFallback));
 
 		if (album) {
 			albums.push(album);
@@ -355,18 +383,22 @@ export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbums
 
 export async function getAlbum(albumId: string): Promise<PlexAlbum> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(albumId)}`);
-	const albumNode = toArray(container.Metadata as PlexNode | PlexNode[]).at(0);
+	const albumNode = toArray((container.Metadata ?? container.Directory) as PlexNode | PlexNode[]).at(0);
 
 	if (!albumNode) {
 		throw new Error(`Album ${albumId} was not found in Plex.`);
 	}
 
-	return parseAlbum(albumNode);
+	return parseAlbum(withContainerFallbacks(albumNode, container));
 }
 
 export async function getAlbumTracks(albumId: string): Promise<PlexTrack[]> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(albumId)}/children`);
-	const tracks = toArray((container.Metadata ?? container.Track) as PlexNode | PlexNode[]).map(parseTrack);
+	// Plex returns tracks under Metadata, Track, or Video depending on server version.
+	const nodes = toArray(
+		(container.Metadata ?? container.Track ?? container.Video) as PlexNode | PlexNode[],
+	);
+	const tracks = nodes.map((node) => parseTrack(withContainerFallbacks(node, container)));
 
 	return tracks.sort((left, right) => {
 		const discDelta = (left.parentIndex ?? 0) - (right.parentIndex ?? 0);

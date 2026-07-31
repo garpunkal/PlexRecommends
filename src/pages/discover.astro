@@ -5,7 +5,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import DiscoverCard from '../components/DiscoverCard.astro';
 import { getAllArtists } from '../lib/plex';
 import { getDiscoveryRecommendations } from '../lib/recommendations';
-import { amazonArtistUrl, amazonAlbumUrl } from '../lib/amazon';
+import { amazonArtistUrl, amazonAlbumUrl, youtubeMusicArtistUrl, youtubeMusicAlbumUrl } from '../lib/amazon';
 import type { ArtistRecommendation, AlbumRecommendation } from '../types/recommendations';
 
 let artistRecommendations: ArtistRecommendation[] = [];
@@ -14,7 +14,7 @@ let errorMessage: string | null = null;
 
 try {
 	const libraryArtists = await getAllArtists();
-	const discovery = await getDiscoveryRecommendations(libraryArtists, 5, 10, 10);
+	const discovery = await getDiscoveryRecommendations(libraryArtists, 5,30, 30);
 	artistRecommendations = discovery.artists;
 	albumRecommendations = discovery.albums;
 } catch (error) {
@@ -94,6 +94,7 @@ try {
 									sources={artist.sources}
 									score={artist.score}
 									amazonUrl={amazonArtistUrl(artist.name)}
+									youtubeMusicUrl={youtubeMusicArtistUrl(artist.name)}
 									plexHref={
 										artist.plexArtistId
 											? `/artist/${encodeURIComponent(artist.plexArtistId)}`
@@ -126,6 +127,7 @@ try {
 									sources={album.sources}
 									score={album.score}
 									amazonUrl={amazonAlbumUrl(album.artistName, album.title)}
+									youtubeMusicUrl={youtubeMusicAlbumUrl(album.artistName, album.title)}
 								/>
 							))}
 						</div>
