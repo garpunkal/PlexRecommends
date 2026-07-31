@@ -17,19 +17,21 @@ if (!artistId) {
 
 let artist: PlexArtist | null = null;
 let albums: PlexAlbum[] = [];
+let albumsSkippedCount = 0;
 let recommendations: ArtistRecommendation[] = [];
 let errorMessage: string | null = null;
 let recommendationError: string | null = null;
 
 try {
-	const [artistRecord, albumRecords, libraryArtists] = await Promise.all([
+	const [artistRecord, albumResult, libraryArtists] = await Promise.all([
 		getArtist(artistId),
 		getArtistAlbums(artistId),
 		getAllArtists(),
 	]);
 
 	artist = artistRecord;
-	albums = albumRecords;
+	albums = albumResult.albums;
+	albumsSkippedCount = albumResult.skippedCount;
 
 	try {
 		recommendations = await getArtistRecommendations(artistRecord, libraryArtists);
@@ -112,7 +114,9 @@ try {
 						{
 							albums.length === 0 ? (
 								<div class="rounded-3xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-sm leading-6 text-slate-400">
-									No albums were returned for this artist.
+									{albumsSkippedCount > 0
+										? `Plex returned ${albumsSkippedCount} child ${albumsSkippedCount === 1 ? 'record' : 'records'} for this artist but none could be parsed as albums (missing id, title, or artist link). This is likely a non-album child type such as a playlist or loose track.`
+										: 'Plex returned no children for this artist. The library may be empty or still scanning.'}
 								</div>
 							) : (
 								<div class="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">

@@ -151,6 +151,24 @@ function parseAlbum(node: PlexNode): PlexAlbum {
 	};
 }
 
+/**
+ * Like parseAlbum, but returns null for nodes that are missing required fields
+ * (e.g. non-album children such as playlists or loose tracks) instead of throwing.
+ */
+function safeParseAlbum(node: PlexNode): PlexAlbum | null {
+	try {
+		return parseAlbum(node);
+	} catch {
+		return null;
+	}
+}
+
+export interface GetArtistAlbumsResult {
+	albums: PlexAlbum[];
+	/** Number of child nodes that were skipped because they lacked required album fields. */
+	skippedCount: number;
+}
+
 function parseTrack(node: PlexNode): PlexTrack {
 	const id = asString(node.ratingKey);
 	const title = asString(node.title);
@@ -206,14 +224,30 @@ export async function getArtist(artistId: string): Promise<PlexArtist> {
 	return parseArtist(artistNode);
 }
 
-export async function getArtistAlbums(artistId: string): Promise<PlexAlbum[]> {
+export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbumsResult> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
 	// Plex returns album children as Metadata on most servers but as Directory on others.
-	const albums = toArray((container.Metadata ?? container.Directory) as PlexNode | PlexNode[]).map(parseAlbum);
-	return albums.sort((left, right) => {
+	const nodes = toArray((container.Metadata ?? container.Directory) as PlexNode | PlexNode[]);
+
+	const albums: PlexAlbum[] = [];
+	let skippedCount = 0;
+
+	for (const node of nodes) {
+		const album = safeParseAlbum(node);
+
+		if (album) {
+			albums.push(album);
+		} else {
+			skippedCount += 1;
+		}
+	}
+
+	albums.sort((left, right) => {
 		const yearDelta = (right.year ?? 0) - (left.year ?? 0);
 		return yearDelta === 0 ? left.title.localeCompare(right.title) : yearDelta;
 	});
+
+	return { albums, skippedCount };
 }
 
 export async function getAlbum(albumId: string): Promise<PlexAlbum> {
