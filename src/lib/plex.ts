@@ -44,6 +44,51 @@ function asString(value: unknown): string | undefined {
 	return undefined;
 }
 
+/** Named entity table covering everything Plex is known to embed in text fields. */
+const HTML_NAMED_ENTITIES: Record<string, string> = {
+	amp: '&',
+	lt: '<',
+	gt: '>',
+	quot: '"',
+	apos: "'",
+	nbsp: '\u00a0',
+};
+
+/**
+ * Decodes HTML/XML character references and named entities in a string so
+ * Plex text fields (summary, title, artist name) render correctly in the UI.
+ *
+ * Handles:
+ *   - Hex numeric refs:     &#xD; &#xA; &#x27; …
+ *   - Decimal numeric refs: &#13; &#10; &#39; …
+ *   - Named entities:       &amp; &lt; &gt; &quot; &apos; &nbsp;
+ *   - CRLF normalisation:   &#xD;&#xA; / \r\n / \r → \n
+ *
+ * Does NOT alter structural values (ids, paths, dates).
+ */
+function decodeHtmlEntities(value: string): string {
+	return value
+		// Hex numeric references first so &#xD;&#xA; becomes \r\n before CRLF normalisation.
+		.replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+		// Decimal numeric references.
+		.replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+		// Named entities.
+		.replace(/&([a-zA-Z]+);/g, (match, name: string) => HTML_NAMED_ENTITIES[name.toLowerCase()] ?? match)
+		// Normalise all line-ending variants to LF, then trim surrounding whitespace.
+		.replace(/\r\n|\r/g, '\n')
+		.trim();
+}
+
+/**
+ * Like asString, but additionally decodes HTML entities.
+ * Use for human-readable display fields (title, name, summary).
+ * Do NOT use for structural fields (ratingKey, thumb, art, dates).
+ */
+function asText(value: unknown): string | undefined {
+	const raw = asString(value);
+	return raw !== undefined ? decodeHtmlEntities(raw) : undefined;
+}
+
 function asNumber(value: unknown): number | undefined {
 	if (typeof value === 'number' && Number.isFinite(value)) {
 		return value;
@@ -109,7 +154,7 @@ function parseGenres(node: PlexNode): string[] {
 
 function parseArtist(node: PlexNode): PlexArtist {
 	const id = asString(node.ratingKey);
-	const name = asString(node.title);
+	const name = asText(node.title);
 
 	if (!id || !name) {
 		throw new Error('Encountered an invalid Plex artist record.');
@@ -118,7 +163,7 @@ function parseArtist(node: PlexNode): PlexArtist {
 	return {
 		id,
 		name,
-		summary: asString(node.summary),
+		summary: asText(node.summary),
 		thumbUrl: buildPlexAssetUrl(asString(node.thumb)),
 		artUrl: buildPlexAssetUrl(asString(node.art)),
 		albumCount: asNumber(node.childCount) ?? 0,
@@ -128,9 +173,9 @@ function parseArtist(node: PlexNode): PlexArtist {
 
 function parseAlbum(node: PlexNode): PlexAlbum {
 	const id = asString(node.ratingKey);
-	const title = asString(node.title);
+	const title = asText(node.title);
 	const artistId = asString(node.parentRatingKey) ?? asString(node.grandparentRatingKey);
-	const artistName = asString(node.parentTitle) ?? asString(node.grandparentTitle);
+	const artistName = asText(node.parentTitle) ?? asText(node.grandparentTitle);
 
 	if (!id || !title || !artistId || !artistName) {
 		throw new Error('Encountered an invalid Plex album record.');
@@ -142,7 +187,7 @@ function parseAlbum(node: PlexNode): PlexAlbum {
 		artistId,
 		artistName,
 		year: asNumber(node.year),
-		summary: asString(node.summary),
+		summary: asText(node.summary),
 		thumbUrl: buildPlexAssetUrl(asString(node.thumb)),
 		artUrl: buildPlexAssetUrl(asString(node.art) ?? asString(node.parentArt)),
 		trackCount: asNumber(node.leafCount) ?? 0,
@@ -220,7 +265,7 @@ function collectAlbumCandidateNodes(container: PlexNode): { nodes: PlexNode[]; s
 
 function parseTrack(node: PlexNode): PlexTrack {
 	const id = asString(node.ratingKey);
-	const title = asString(node.title);
+	const title = asText(node.title);
 	const index = asNumber(node.index);
 
 	if (!id || !title || index === undefined) {
