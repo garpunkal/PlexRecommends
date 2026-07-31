@@ -208,7 +208,8 @@ export async function getArtist(artistId: string): Promise<PlexArtist> {
 
 export async function getArtistAlbums(artistId: string): Promise<PlexAlbum[]> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
-	const albums = toArray(container.Metadata as PlexNode | PlexNode[]).map(parseAlbum);
+	// Plex returns album children as Metadata on most servers but as Directory on others.
+	const albums = toArray((container.Metadata ?? container.Directory) as PlexNode | PlexNode[]).map(parseAlbum);
 	return albums.sort((left, right) => {
 		const yearDelta = (right.year ?? 0) - (left.year ?? 0);
 		return yearDelta === 0 ? left.title.localeCompare(right.title) : yearDelta;
