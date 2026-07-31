@@ -210,6 +210,7 @@ export async function getDiscoveryRecommendations(
 
 	const mergedArtists = new Map<string, ArtistRecommendation>();
 	const seedKeys = new Set(chartArtists.map(normalizeKey));
+	const libraryArtistKeys = new Set(libraryArtists.map((a) => normalizeKey(a.name)));
 
 	for (const result of artistResults) {
 		if (result.status !== 'fulfilled') {
@@ -221,6 +222,11 @@ export async function getDiscoveryRecommendations(
 
 			// Exclude seeds themselves — they're the starting point, not discoveries.
 			if (seedKeys.has(key)) {
+				continue;
+			}
+
+			// Exclude artists already in the Plex library.
+			if (libraryArtistKeys.has(key)) {
 				continue;
 			}
 
@@ -272,6 +278,12 @@ export async function getDiscoveryRecommendations(
 
 		for (const recommendation of result.value) {
 			const key = normalizeKey(`${recommendation.artistName}::${recommendation.title}`);
+
+			// Exclude albums by artists already in the Plex library.
+			if (libraryArtistKeys.has(normalizeKey(recommendation.artistName))) {
+				continue;
+			}
+
 			const current = mergedAlbums.get(key);
 
 			if (!current) {
