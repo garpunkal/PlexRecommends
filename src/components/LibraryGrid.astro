@@ -34,7 +34,7 @@ const { artists } = Astro.props as Props;
 		</div>
 	</div>
 
-	<div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+	<div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
 		{
 			artists.map((artist) => (
 				<div data-artist-card data-artist-name={artist.name.toLocaleLowerCase()}>

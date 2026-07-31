@@ -1,0 +1,118 @@
+---
+import type { RecommendationSource } from '../types/recommendations';
+
+interface Props {
+	kind: 'artist' | 'album';
+	name: string;
+	subtitle: string;
+	imageUrl?: string;
+	tags: string[];
+	sources: RecommendationSource[];
+	score: number;
+	amazonUrl: string;
+	plexHref?: string;
+}
+
+const props = Astro.props as Props;
+
+const sourceLabels: Record<RecommendationSource, string> = {
+	lastfm: 'Last.fm',
+	musicbrainz: 'MusicBrainz',
+	spotify: 'Spotify',
+};
+
+function formatScore(score: number) {
+	return score >= 10 ? score.toFixed(1) : score.toFixed(0);
+}
+---
+
+<article class="group flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-800/80 shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-[#e5a00d]/50 hover:shadow-xl hover:shadow-[#e5a00d]/10">
+	<div class="flex items-start gap-4 p-5">
+		<!-- Thumbnail -->
+		<div class="shrink-0">
+			{
+				props.imageUrl ? (
+					<img
+						src={props.imageUrl}
+						alt={`${props.name} artwork`}
+						loading="lazy"
+						class="h-16 w-16 rounded-2xl object-cover ring-1 ring-white/10"
+					/>
+				) : (
+					<div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 ring-1 ring-white/10">
+						{props.kind === 'artist' ? (
+							<svg class="h-7 w-7 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
+							</svg>
+						) : (
+							<svg class="h-7 w-7 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+							</svg>
+						)}
+					</div>
+				)
+			}
+		</div>
+
+		<!-- Info -->
+		<div class="min-w-0 flex-1">
+			<div class="flex items-start justify-between gap-2">
+				<div class="min-w-0">
+					<h3 class="truncate text-base font-semibold text-white transition group-hover:text-[#f4c561]">
+						{props.name}
+					</h3>
+					<p class="mt-0.5 truncate text-sm text-slate-400">{props.subtitle}</p>
+				</div>
+
+				<span class="shrink-0 rounded-full border border-[#e5a00d]/20 bg-[#e5a00d]/10 px-2 py-1 text-xs font-medium text-[#f4c561]">
+					{formatScore(props.score)}
+				</span>
+			</div>
+
+			<!-- Tags & sources -->
+			<div class="mt-3 flex flex-wrap gap-1.5">
+				{
+					props.sources.map((source) => (
+						<span class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-medium text-slate-300">
+							{sourceLabels[source]}
+						</span>
+					))
+				}
+				{
+					props.tags.slice(0, 3).map((tag) => (
+						<span class="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-xs font-medium text-emerald-200">
+							{tag}
+						</span>
+					))
+				}
+			</div>
+		</div>
+	</div>
+
+	<!-- Action bar -->
+	<div class="mt-auto flex items-center gap-2 border-t border-white/10 px-5 py-3">
+		<!-- Amazon Music UK link -->
+		<a
+			href={props.amazonUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/20"
+		>
+			<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<path d="M22.03 15.3c-.3.16-.57.02-.74-.26-.16-.27-.12-.53.14-.73 1.93-1.62 2.5-4.28 1.38-6.54-1.1-2.24-3.6-3.38-6.03-2.8-1.67.4-3.03 1.57-3.77 3.16-.67 1.42-.72 3.03-.15 4.5.19.49-.02.96-.5 1.1-.48.13-.96-.1-1.12-.6-.7-1.88-.64-3.94.16-5.76C12.53 5.84 14.3 4.5 16.4 4.02c3.07-.72 6.24.77 7.66 3.58 1.43 2.83.74 6.27-2.03 7.7zM2.74 18.18c5.83 3.59 13.7 2.3 18.17-2.97.3-.35.27-.88-.09-1.18-.35-.3-.88-.27-1.17.08C15.57 18.7 8.74 19.8 3.7 16.66c-.4-.25-.93-.12-1.18.28-.25.4-.12.93.22 1.24zm8.73-4.44c-.67 1.13-1.5 2.07-2.5 2.83-2.48 1.9-5.7 2.3-8.63 1.02-.54-.24-.62-.73-.41-1.1.22-.37.72-.5 1.2-.3 2.42 1.05 5.1.73 7.15-.84.9-.7 1.63-1.56 2.22-2.56.27-.46.83-.58 1.28-.26.42.3.5.78.2 1.21l-.51.0z" />
+			</svg>
+			Listen on Amazon Music UK
+		</a>
+
+		{
+			props.plexHref && (
+				<a
+					href={props.plexHref}
+					class="flex items-center justify-center gap-1.5 rounded-2xl border border-[#e5a00d]/30 bg-[#e5a00d]/10 px-4 py-2 text-xs font-semibold text-[#f4c561] transition hover:border-[#e5a00d]/60 hover:bg-[#e5a00d]/20"
+				>
+					In Plex
+				</a>
+			)
+		}
+	</div>
+</article>

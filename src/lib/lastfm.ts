@@ -227,3 +227,42 @@ export function getSimilarAlbumsFromTags(
 
 	return similarAlbumCache.get(cacheKey)!;
 }
+
+const topChartArtistsCache = new Map<string, Promise<string[]>>();
+
+/**
+ * Returns the top N Last.fm chart artists for a given period.
+ * Used as discovery seeds for the /discover page.
+ */
+export function getTopChartArtists(limit = 10): Promise<string[]> {
+	const cacheKey = getCacheKey('chart', String(limit));
+
+	if (!topChartArtistsCache.has(cacheKey)) {
+		topChartArtistsCache.set(
+			cacheKey,
+			(async () => {
+				const payload = (await fetchLastFm('chart.getTopArtists', {
+					limit: String(limit),
+				})) as {
+					artists?: {
+						artist?: Array<{ name?: string }>;
+					};
+				};
+
+				const names: string[] = [];
+
+				for (const artist of toArray(payload.artists?.artist)) {
+					const name = artist.name?.trim();
+
+					if (name) {
+						names.push(name);
+					}
+				}
+
+				return names;
+			})(),
+		);
+	}
+
+	return topChartArtistsCache.get(cacheKey)!;
+}

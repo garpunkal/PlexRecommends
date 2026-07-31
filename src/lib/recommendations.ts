@@ -1,4 +1,4 @@
-import { getAlbumInfo, getSimilarAlbumsFromTags, getSimilarArtists } from './lastfm';
+import { getAlbumInfo, getSimilarAlbumsFromTags, getSimilarArtists, getTopChartArtists } from './lastfm';
 import { getRelatedAlbums as getMusicBrainzRelatedAlbums, getRelatedArtists as getMusicBrainzRelatedArtists } from './musicbrainz';
 import { getRelatedArtists as getSpotifyRelatedArtists } from './spotify';
 import type { PlexAlbum, PlexArtist } from '../types/plex';
@@ -177,3 +177,124 @@ export async function getAlbumRecommendations(album: PlexAlbum): Promise<AlbumRe
 }
 
 export { getAlbumInfo };
+
+export interface DiscoveryResult {
+	artists: ArtistRecommendation[];
+	albums: AlbumRecommendation[];
+}
+
+/**
+ * Builds a cross-source discovery feed not tied to any single library item.
+ * Seeds from the Last.fm top-chart artists, fans out to Last.fm similar-artist
+ * data and album-tag data, deduplicates, scores, and returns the top picks.
+ * MusicBrainz and Spotify are intentionally excluded here to avoid hammering
+ * rate-limited endpoints for a broad aggregate query.
+ */
+export async function getDiscoveryRecommendations(
+	libraryArtists: PlexArtist[],
+	seedCount = 5,
+	topArtists = 10,
+	topAlbums = 10,
+): Promise<DiscoveryResult> {
+	const chartArtists = await getTopChartArtists(seedCount).catch(() => [] as string[]);
+	const libraryLookup = buildLibraryLookup(libraryArtists);
+
+	if (chartArtists.length === 0) {
+		return { artists: [], albums: [] };
+	}
+
+	// Fan out to similar-artist lists for all seed artists in parallel.
+	const artistResults = await Promise.allSettled(
+		chartArtists.map((name) => getSimilarArtists(name)),
+	);
+
+	const mergedArtists = new Map<string, ArtistRecommendation>();
+	const seedKeys = new Set(chartArtists.map(normalizeKey));
+
+	for (const result of artistResults) {
+		if (result.status !== 'fulfilled') {
+			continue;
+		}
+
+		for (const recommendation of result.value) {
+			const key = normalizeKey(recommendation.name);
+
+			// Exclude seeds themselves — they're the starting point, not discoveries.
+			if (seedKeys.has(key)) {
+				continue;
+			}
+
+			const current = mergedArtists.get(key);
+
+			if (!current) {
+				mergedArtists.set(
+					key,
+					finalizeItem({
+						...recommendation,
+						plexArtistId: libraryLookup.get(key)?.id,
+					}),
+				);
+				continue;
+			}
+
+			mergedArtists.set(
+				key,
+				finalizeItem({
+					...current,
+					match: Math.max(current.match ?? 0, recommendation.match ?? 0) || undefined,
+					imageUrl: current.imageUrl ?? recommendation.imageUrl,
+					tags: mergeTags(current.tags, recommendation.tags),
+					sources: [...current.sources, ...recommendation.sources],
+					plexArtistId: current.plexArtistId ?? libraryLookup.get(key)?.id,
+				}),
+			);
+		}
+	}
+
+	const artists = Array.from(mergedArtists.values())
+		.sort(sortRecommendations)
+		.slice(0, topArtists);
+
+	// Pull album recommendations from the top discovered artists.
+	const albumSeeds = artists.slice(0, 3);
+	const albumResults = await Promise.allSettled(
+		albumSeeds.map((artist) =>
+			getSimilarAlbumsFromTags(artist.name, '').catch(() => [] as AlbumRecommendation[]),
+		),
+	);
+
+	const mergedAlbums = new Map<string, AlbumRecommendation>();
+
+	for (const result of albumResults) {
+		if (result.status !== 'fulfilled') {
+			continue;
+		}
+
+		for (const recommendation of result.value) {
+			const key = normalizeKey(`${recommendation.artistName}::${recommendation.title}`);
+			const current = mergedAlbums.get(key);
+
+			if (!current) {
+				mergedAlbums.set(key, finalizeItem(recommendation));
+				continue;
+			}
+
+			mergedAlbums.set(
+				key,
+				finalizeItem({
+					...current,
+					match: Math.max(current.match ?? 0, recommendation.match ?? 0) || undefined,
+					imageUrl: current.imageUrl ?? recommendation.imageUrl,
+					tags: mergeTags(current.tags, recommendation.tags),
+					sources: [...current.sources, ...recommendation.sources],
+				}),
+			);
+		}
+	}
+
+	const albums = Array.from(mergedAlbums.values())
+		.sort(sortRecommendations)
+		.slice(0, topAlbums);
+
+	return { artists, albums };
+}
