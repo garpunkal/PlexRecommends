@@ -167,6 +167,55 @@ export interface GetArtistAlbumsResult {
 	albums: PlexAlbum[];
 	/** Number of child nodes that were skipped because they lacked required album fields. */
 	skippedCount: number;
+	/**
+	 * Populated when albums is empty. Contains the artist id and the actual
+	 * top-level keys returned by Plex so the caller can distinguish
+	 * "Plex gave us nothing" from "Plex gave us something we couldn't parse".
+	 */
+	diagnosticMessage?: string;
+}
+
+/**
+ * Collects every candidate album node from a Plex children container.
+ *
+ * Plex can return albums under `Metadata`, `Directory`, or (rarely) another key.
+ * Strategy:
+ *   1. Try the two known keys in order.
+ *   2. If both are empty, scan every value in the container that is either
+ *      an object array or a single object possessing a `ratingKey` attribute —
+ *      those are album-like regardless of their XML element name.
+ */
+function collectAlbumCandidateNodes(container: PlexNode): { nodes: PlexNode[]; sourceKey: string } {
+	// Well-known keys first.
+	for (const key of ['Metadata', 'Directory']) {
+		const nodes = toArray(container[key] as PlexNode | PlexNode[]);
+
+		if (nodes.length > 0) {
+			return { nodes, sourceKey: key };
+		}
+	}
+
+	// Fallback: any container value that looks like an album (has ratingKey).
+	const NON_CHILD_KEYS = new Set([
+		'size', 'allowSync', 'art', 'identifier', 'key', 'librarySectionID',
+		'librarySectionTitle', 'librarySectionUUID', 'mediaTagPrefix', 'mediaTagVersion',
+		'nocache', 'parentIndex', 'parentTitle', 'parentYear', 'thumb', 'title1', 'title2',
+		'viewGroup', 'viewMode',
+	]);
+
+	for (const [key, value] of Object.entries(container)) {
+		if (NON_CHILD_KEYS.has(key)) {
+			continue;
+		}
+
+		const candidates = toArray(value as PlexNode | PlexNode[]);
+
+		if (candidates.length > 0 && candidates.every((c) => c && typeof c === 'object' && 'ratingKey' in c)) {
+			return { nodes: candidates, sourceKey: key };
+		}
+	}
+
+	return { nodes: [], sourceKey: '(none)' };
 }
 
 function parseTrack(node: PlexNode): PlexTrack {
@@ -226,8 +275,7 @@ export async function getArtist(artistId: string): Promise<PlexArtist> {
 
 export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbumsResult> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
-	// Plex returns album children as Metadata on most servers but as Directory on others.
-	const nodes = toArray((container.Metadata ?? container.Directory) as PlexNode | PlexNode[]);
+	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
 
 	const albums: PlexAlbum[] = [];
 	let skippedCount = 0;
@@ -246,6 +294,16 @@ export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbums
 		const yearDelta = (right.year ?? 0) - (left.year ?? 0);
 		return yearDelta === 0 ? left.title.localeCompare(right.title) : yearDelta;
 	});
+
+	if (albums.length === 0) {
+		const containerKeys = Object.keys(container).join(', ') || '(empty)';
+		const diagnosticMessage =
+			skippedCount > 0
+				? `Artist ${artistId}: Plex returned ${skippedCount} child node(s) under key "${sourceKey}" but none could be parsed as albums. Container keys: [${containerKeys}].`
+				: `Artist ${artistId}: Plex returned no recognisable child nodes. Container keys: [${containerKeys}].`;
+
+		return { albums, skippedCount, diagnosticMessage };
+	}
 
 	return { albums, skippedCount };
 }
