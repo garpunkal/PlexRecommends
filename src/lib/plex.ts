@@ -322,30 +322,40 @@ export async function getArtist(artistId: string): Promise<PlexArtist> {
  * Injects container-level parent attributes into a child node as fallback values.
  *
  * Plex often puts parentRatingKey / parentTitle (and grandparent equivalents) on
- * the MediaContainer element rather than on each child node. Spreading them first
- * means the node's own attributes always win when present.
+ * the MediaContainer element rather than on each child node.
+ *
+ * IMPORTANT: fast-xml-parser sets empty or absent XML attributes to "" in the
+ * output. Simply spreading the node last (node wins) would let "" override the
+ * container fallback. Instead, we only keep the node's value when it is non-empty.
  */
 function withContainerFallbacks(node: PlexNode, container: PlexNode): PlexNode {
-	return {
-		// Container-level breadcrumb attributes as fallbacks.
-		parentRatingKey: container.parentRatingKey,
-		parentTitle: container.parentTitle,
-		grandparentRatingKey: container.grandparentRatingKey,
-		grandparentTitle: container.grandparentTitle,
-		// Node's own attributes take priority by spreading last.
-		...node,
-	};
+	const result: PlexNode = { ...node };
+
+	for (const key of ['parentRatingKey', 'parentTitle', 'grandparentRatingKey', 'grandparentTitle'] as const) {
+		if (!asString(result[key])) {
+			const fallback = container[key];
+			if (fallback !== undefined && fallback !== '') {
+				result[key] = fallback;
+			}
+		}
+	}
+
+	return result;
 }
 
-export async function getArtistAlbums(artistId: string): Promise<GetArtistAlbumsResult> {
+export async function getArtistAlbums(
+	artistId: string,
+	knownArtistName?: string,
+): Promise<GetArtistAlbumsResult> {
 	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
 
-	// When child nodes are missing parentRatingKey / parentTitle, fall back to
-	// the container's own attributes (which carry the parent artist's info) or
-	// the artistId we already know.
+	// Build the best fallback we have for parentRatingKey and parentTitle.
+	// The container's own parentTitle / parentRatingKey are preferred; the
+	// caller-supplied values are the last resort.
 	const containerWithArtistFallback: PlexNode = {
 		...container,
 		parentRatingKey: asString(container.parentRatingKey) ?? artistId,
+		parentTitle: asText(container.parentTitle) ?? asText(container.title2) ?? knownArtistName,
 	};
 
 	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);

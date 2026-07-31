@@ -23,13 +23,14 @@ let errorMessage: string | null = null;
 let recommendationError: string | null = null;
 
 try {
-	const [artistRecord, albumResult, libraryArtists] = await Promise.all([
-		getArtist(artistId),
-		getArtistAlbums(artistId),
+	const artistRecord = await getArtist(artistId);
+	artist = artistRecord;
+
+	const [albumResult, libraryArtists] = await Promise.all([
+		getArtistAlbums(artistId, artistRecord.name),
 		getAllArtists(),
 	]);
 
-	artist = artistRecord;
 	albums = albumResult.albums;
 	albumsDiagnostic = albumResult.diagnosticMessage;
 

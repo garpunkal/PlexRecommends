@@ -1,4 +1,4 @@
-import { getAlbumInfo, getSimilarAlbumsFromTags, getSimilarArtists, getTopChartArtists } from './lastfm';
+import { getAlbumInfo, getArtistInfo, getSimilarAlbumsFromTags, getSimilarArtists } from './lastfm';
 import { getRelatedAlbums as getMusicBrainzRelatedAlbums, getRelatedArtists as getMusicBrainzRelatedArtists } from './musicbrainz';
 import { getRelatedArtists as getSpotifyRelatedArtists } from './spotify';
 import type { PlexAlbum, PlexArtist } from '../types/plex';
@@ -184,33 +184,35 @@ export interface DiscoveryResult {
 }
 
 /**
- * Builds a cross-source discovery feed not tied to any single library item.
- * Seeds from the Last.fm top-chart artists, fans out to Last.fm similar-artist
- * data and album-tag data, deduplicates, scores, and returns the top picks.
- * MusicBrainz and Spotify are intentionally excluded here to avoid hammering
- * rate-limited endpoints for a broad aggregate query.
+ * Builds a cross-source discovery feed seeded from the user's own Plex library.
+ * Picks a random sample of library artists, fans out to Last.fm similar-artist
+ * data, deduplicates, scores, excludes library artists, and returns the top picks.
+ * For each top discovered artist, fetches artist.getInfo to enrich tags and images.
  */
 export async function getDiscoveryRecommendations(
 	libraryArtists: PlexArtist[],
-	seedCount = 5,
-	topArtists = 10,
-	topAlbums = 10,
+	seedCount = 8,
+	topArtists = 30,
+	topAlbums = 30,
 ): Promise<DiscoveryResult> {
-	const chartArtists = await getTopChartArtists(seedCount).catch(() => [] as string[]);
-	const libraryLookup = buildLibraryLookup(libraryArtists);
-
-	if (chartArtists.length === 0) {
+	if (libraryArtists.length === 0) {
 		return { artists: [], albums: [] };
 	}
 
+	// Pick a random sample of library artists as seeds.
+	const shuffled = [...libraryArtists].sort(() => Math.random() - 0.5);
+	const seeds = shuffled.slice(0, Math.min(seedCount, shuffled.length));
+
+	const libraryLookup = buildLibraryLookup(libraryArtists);
+	const libraryArtistKeys = new Set(libraryArtists.map((a) => normalizeKey(a.name)));
+	const seedKeys = new Set(seeds.map((a) => normalizeKey(a.name)));
+
 	// Fan out to similar-artist lists for all seed artists in parallel.
 	const artistResults = await Promise.allSettled(
-		chartArtists.map((name) => getSimilarArtists(name)),
+		seeds.map((seed) => getSimilarArtists(seed.name)),
 	);
 
 	const mergedArtists = new Map<string, ArtistRecommendation>();
-	const seedKeys = new Set(chartArtists.map(normalizeKey));
-	const libraryArtistKeys = new Set(libraryArtists.map((a) => normalizeKey(a.name)));
 
 	for (const result of artistResults) {
 		if (result.status !== 'fulfilled') {
@@ -220,13 +222,8 @@ export async function getDiscoveryRecommendations(
 		for (const recommendation of result.value) {
 			const key = normalizeKey(recommendation.name);
 
-			// Exclude seeds themselves — they're the starting point, not discoveries.
-			if (seedKeys.has(key)) {
-				continue;
-			}
-
-			// Exclude artists already in the Plex library.
-			if (libraryArtistKeys.has(key)) {
+			// Exclude seeds and all library artists — we want new discoveries only.
+			if (seedKeys.has(key) || libraryArtistKeys.has(key)) {
 				continue;
 			}
 
@@ -257,9 +254,29 @@ export async function getDiscoveryRecommendations(
 		}
 	}
 
-	const artists = Array.from(mergedArtists.values())
+	const topArtistList = Array.from(mergedArtists.values())
 		.sort(sortRecommendations)
 		.slice(0, topArtists);
+
+	// Enrich the top 15 discovered artists with artist.getInfo (tags + image).
+	// Last.fm deprecated artist images so imageUrl may still be empty, but tags
+	// are still populated and improve the UI significantly.
+	const enrichLimit = Math.min(15, topArtistList.length);
+	const infoResults = await Promise.allSettled(
+		topArtistList.slice(0, enrichLimit).map((a) => getArtistInfo(a.name)),
+	);
+
+	const artists: ArtistRecommendation[] = topArtistList.map((artist, index) => {
+		if (index >= enrichLimit) return artist;
+		const infoResult = infoResults[index];
+		if (infoResult?.status !== 'fulfilled') return artist;
+		const info = infoResult.value;
+		return finalizeItem({
+			...artist,
+			imageUrl: artist.imageUrl ?? info.imageUrl,
+			tags: artist.tags.length > 0 ? artist.tags : info.tags,
+		});
+	});
 
 	// Pull album recommendations from the top discovered artists.
 	const albumSeeds = artists.slice(0, 3);

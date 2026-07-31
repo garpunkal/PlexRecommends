@@ -14,7 +14,7 @@ let errorMessage: string | null = null;
 
 try {
 	const libraryArtists = await getAllArtists();
-	const discovery = await getDiscoveryRecommendations(libraryArtists, 5,30, 30);
+	const discovery = await getDiscoveryRecommendations(libraryArtists, 8, 30, 30);
 	artistRecommendations = discovery.artists;
 	albumRecommendations = discovery.albums;
 } catch (error) {
@@ -37,9 +37,9 @@ try {
 				Explore beyond your library.
 			</h1>
 			<p class="mt-4 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">
-				Recommendations seeded from the current Last.fm charts, cross-referenced with your Plex library.
-				Every pick links directly to <strong class="text-white">Amazon Music UK</strong> so you can
-				listen immediately, and known library matches link back to Plex.
+					Recommendations seeded from a random sample of <strong class="text-white">your Plex library</strong> — artists you already love, fanned out via Last.fm similarity.
+					Every pick links directly to <strong class="text-white">Amazon Music UK</strong> and <strong class="text-white">YouTube Music</strong> so you can
+					listen immediately. Library artists are excluded so you only see new discoveries.
 			</p>
 		</div>
 
@@ -47,7 +47,7 @@ try {
 			<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-6">
 				<p class="text-sm font-medium uppercase tracking-[0.22em] text-slate-400">Artist picks</p>
 				<p class="mt-3 text-4xl font-semibold text-white">{artistRecommendations.length}</p>
-				<p class="mt-2 text-sm text-slate-400">Seeded from the Last.fm top-chart artists.</p>
+				<p class="mt-2 text-sm text-slate-400">Seeded from a random sample of your library.</p>
 			</div>
 			<div class="rounded-3xl border border-white/10 bg-slate-800/80 p-6">
 				<p class="text-sm font-medium uppercase tracking-[0.22em] text-slate-400">Album picks</p>

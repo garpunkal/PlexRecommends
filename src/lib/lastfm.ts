@@ -7,6 +7,7 @@ interface LastFmAlbumInfo {
 
 const LASTFM_API_ROOT = 'https://ws.audioscrobbler.com/2.0/';
 const similarArtistCache = new Map<string, Promise<ArtistRecommendation[]>>();
+const artistInfoCache = new Map<string, Promise<{ imageUrl?: string; tags: string[] }>>();
 const albumInfoCache = new Map<string, Promise<LastFmAlbumInfo>>();
 const similarAlbumCache = new Map<string, Promise<AlbumRecommendation[]>>();
 
@@ -76,6 +77,38 @@ async function fetchLastFm(method: string, params: Record<string, string>): Prom
 	}
 
 	return response.json();
+}
+
+export function getArtistInfo(artistName: string): Promise<{ imageUrl?: string; tags: string[] }> {
+	const cacheKey = getCacheKey('artist-info', artistName);
+
+	if (!artistInfoCache.has(cacheKey)) {
+		artistInfoCache.set(
+			cacheKey,
+			(async () => {
+				const payload = (await fetchLastFm('artist.getInfo', {
+					artist: artistName,
+					autocorrect: '1',
+				})) as {
+					artist?: {
+						image?: Array<{ '#text'?: string }>;
+						tags?: { tag?: Array<{ name?: string }> };
+					};
+				};
+
+				const tags = toArray(payload.artist?.tags?.tag)
+					.map((tag) => tag.name?.trim())
+					.filter((tag): tag is string => Boolean(tag));
+
+				return {
+					imageUrl: largestLastFmImage(payload.artist?.image),
+					tags,
+				};
+			})(),
+		);
+	}
+
+	return artistInfoCache.get(cacheKey)!;
 }
 
 export function getSimilarArtists(artistName: string): Promise<ArtistRecommendation[]> {
