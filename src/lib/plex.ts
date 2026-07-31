@@ -174,13 +174,14 @@ function parseArtist(node: PlexNode): PlexArtist {
 function parseAlbum(node: PlexNode): PlexAlbum {
 	const id = asString(node.ratingKey);
 	const title = asText(node.title);
-	const artistId = asString(node.parentRatingKey) ?? asString(node.grandparentRatingKey);
-	const artistName = asText(node.parentTitle) ?? asText(node.grandparentTitle);
 
-	if (!id) throw new Error(`Album node missing ratingKey (got: ${JSON.stringify(node.ratingKey)})`);
-	if (!title) throw new Error(`Album node missing title (got: ${JSON.stringify(node.title)})`);
-	if (!artistId) throw new Error(`Album "${title}" missing parentRatingKey/grandparentRatingKey (got: ${JSON.stringify(node.parentRatingKey)}, ${JSON.stringify(node.grandparentRatingKey)})`);
-	if (!artistName) throw new Error(`Album "${title}" missing parentTitle/grandparentTitle (got: ${JSON.stringify(node.parentTitle)}, ${JSON.stringify(node.grandparentTitle)})`);
+	if (!id) throw new Error(`Album missing ratingKey (got: ${JSON.stringify(node.ratingKey)})`);
+	if (!title) throw new Error(`Album missing title (got: ${JSON.stringify(node.title)})`);
+
+	// artistId/artistName fall back to empty/unknown so a missing parent field
+	// never silently kills the entire album list.
+	const artistId = asString(node.parentRatingKey) ?? asString(node.grandparentRatingKey) ?? '';
+	const artistName = asText(node.parentTitle) ?? asText(node.grandparentTitle) ?? 'Unknown Artist';
 
 	return {
 		id,
@@ -199,13 +200,15 @@ function parseAlbum(node: PlexNode): PlexAlbum {
 
 /**
  * Like parseAlbum, but returns {album, error} — never throws.
- * The error message is surfaced in the diagnostic when all nodes fail.
+ * The error is logged to the console and surfaced in the UI diagnostic.
  */
 function safeParseAlbum(node: PlexNode): { album: PlexAlbum; error?: never } | { album?: never; error: string } {
 	try {
 		return { album: parseAlbum(node) };
 	} catch (err) {
-		return { error: err instanceof Error ? err.message : String(err) };
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error('[PlexRecommends] Album parse failed:', msg, '| keys:', Object.keys(node).join(','));
+		return { error: msg };
 	}
 }
 
@@ -219,49 +222,6 @@ export interface GetArtistAlbumsResult {
 	 * "Plex gave us nothing" from "Plex gave us something we couldn't parse".
 	 */
 	diagnosticMessage?: string;
-}
-
-/**
- * Collects every candidate album node from a Plex children container.
- *
- * Plex can return albums under `Metadata`, `Directory`, or (rarely) another key.
- * Strategy:
- *   1. Try the two known keys in order.
- *   2. If both are empty, scan every value in the container that is either
- *      an object array or a single object possessing a `ratingKey` attribute —
- *      those are album-like regardless of their XML element name.
- */
-function collectAlbumCandidateNodes(container: PlexNode): { nodes: PlexNode[]; sourceKey: string } {
-	// Well-known keys first.
-	for (const key of ['Metadata', 'Directory']) {
-		const nodes = toArray(container[key] as PlexNode | PlexNode[]);
-
-		if (nodes.length > 0) {
-			return { nodes, sourceKey: key };
-		}
-	}
-
-	// Fallback: any container value that looks like an album (has ratingKey).
-	const NON_CHILD_KEYS = new Set([
-		'size', 'allowSync', 'art', 'identifier', 'key', 'librarySectionID',
-		'librarySectionTitle', 'librarySectionUUID', 'mediaTagPrefix', 'mediaTagVersion',
-		'nocache', 'parentIndex', 'parentTitle', 'parentYear', 'thumb', 'title1', 'title2',
-		'viewGroup', 'viewMode',
-	]);
-
-	for (const [key, value] of Object.entries(container)) {
-		if (NON_CHILD_KEYS.has(key)) {
-			continue;
-		}
-
-		const candidates = toArray(value as PlexNode | PlexNode[]);
-
-		if (candidates.length > 0 && candidates.every((c) => c && typeof c === 'object' && 'ratingKey' in c)) {
-			return { nodes: candidates, sourceKey: key };
-		}
-	}
-
-	return { nodes: [], sourceKey: '(none)' };
 }
 
 function parseTrack(node: PlexNode): PlexTrack {
@@ -364,80 +324,55 @@ export async function getArtistAlbums(
 	artistId: string,
 	knownArtistName?: string,
 ): Promise<GetArtistAlbumsResult> {
-	// Primary approach: query the music library section directly for albums
-	// belonging to this artist. This is more reliable than /children because
-	// the library index always populates parentRatingKey and parentTitle on
-	// every album node, regardless of Plex server version.
-	const sectionId = await getMusicSectionId();
-	const container = await fetchPlex(
-		`/library/sections/${sectionId}/all?type=9&parentRatingKey=${encodeURIComponent(artistId)}`,
+	const container = await fetchPlex(`/library/metadata/${encodeURIComponent(artistId)}/children`);
+
+	// Collect candidates from both well-known keys.
+	const rawNodes = [
+		...toArray(container.Metadata as PlexNode | PlexNode[]),
+		...toArray(container.Directory as PlexNode | PlexNode[]),
+	].filter((n): n is PlexNode => !!n && typeof n === 'object' && !!asString((n as PlexNode).ratingKey));
+
+	console.log(
+		`[PlexRecommends] getArtistAlbums artist=${artistId} rawNodes=${rawNodes.length} containerKeys=${Object.keys(container).join(',')}`,
 	);
-
-	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
-
-	// Build fallback parent fields from what we know — the section query nodes
-	// should already have parentRatingKey/parentTitle, but just in case.
-	const containerWithArtistFallback: PlexNode = {
-		...container,
-		parentRatingKey: asString(container.parentRatingKey) ?? artistId,
-		parentTitle: asText(container.parentTitle) ?? asText(container.title2) ?? knownArtistName,
-	};
 
 	const albums: PlexAlbum[] = [];
 	const parseErrors: string[] = [];
-	let skippedCount = 0;
 
-	for (const node of nodes) {
-		const result = safeParseAlbum(withContainerFallbacks(node, containerWithArtistFallback));
+	for (const rawNode of rawNodes) {
+		// Inject known artist values as defaults; the node's own values take priority.
+		const node: PlexNode = { parentRatingKey: artistId, parentTitle: knownArtistName, ...rawNode };
+		// Override with known values only when the node's own field is missing/empty.
+		if (!asString(node.parentRatingKey)) node.parentRatingKey = artistId;
+		if (!asString(node.parentTitle) && knownArtistName) node.parentTitle = knownArtistName;
 
+		const result = safeParseAlbum(node);
 		if (result.album) {
 			albums.push(result.album);
 		} else {
-			skippedCount += 1;
 			parseErrors.push(result.error);
 		}
 	}
 
-	// Fallback: if the section query returned nothing, try the children endpoint.
-	if (albums.length === 0 && skippedCount === 0 && nodes.length === 0) {
-		const childContainer = await fetchPlex(
-			`/library/metadata/${encodeURIComponent(artistId)}/children`,
-		);
-		const { nodes: childNodes } = collectAlbumCandidateNodes(childContainer);
-		const childFallback: PlexNode = {
-			...childContainer,
-			parentRatingKey: asString(childContainer.parentRatingKey) ?? artistId,
-			parentTitle: asText(childContainer.parentTitle) ?? asText(childContainer.title2) ?? knownArtistName,
-		};
-
-		for (const node of childNodes) {
-			const result = safeParseAlbum(withContainerFallbacks(node, childFallback));
-			if (result.album) {
-				albums.push(result.album);
-			} else {
-				skippedCount += 1;
-				parseErrors.push(result.error);
-			}
-		}
-	}
-
-	albums.sort((left, right) => {
-		const yearDelta = (right.year ?? 0) - (left.year ?? 0);
-		return yearDelta === 0 ? left.title.localeCompare(right.title) : yearDelta;
+	albums.sort((a, b) => {
+		const yearDelta = (b.year ?? 0) - (a.year ?? 0);
+		return yearDelta === 0 ? a.title.localeCompare(b.title) : yearDelta;
 	});
 
-	if (albums.length === 0) {
-		const containerKeys = Object.keys(container).join(', ') || '(empty)';
-		const firstError = parseErrors[0] ? ` First error: "${parseErrors[0]}"` : '';
-		const diagnosticMessage =
-			skippedCount > 0
-				? `Artist ${artistId}: ${skippedCount} node(s) found under "${sourceKey}" but none parsed.${firstError} Container keys: [${containerKeys}]`
-				: `Artist ${artistId}: Plex returned no recognisable child nodes. Container keys: [${containerKeys}]`;
+	console.log(`[PlexRecommends] getArtistAlbums artist=${artistId} parsed=${albums.length} errors=${parseErrors.length}`);
 
-		return { albums, skippedCount, diagnosticMessage };
+	if (albums.length === 0) {
+		const firstError = parseErrors[0] ? ` First error: "${parseErrors[0]}"` : '';
+		return {
+			albums,
+			skippedCount: parseErrors.length,
+			diagnosticMessage: rawNodes.length > 0
+				? `${rawNodes.length} node(s) found but ${parseErrors.length} failed to parse.${firstError}`
+				: `No album nodes under Metadata or Directory. Container keys: [${Object.keys(container).join(', ')}]`,
+		};
 	}
 
-	return { albums, skippedCount };
+	return { albums, skippedCount: parseErrors.length };
 }
 
 export async function getAlbum(albumId: string): Promise<PlexAlbum> {
