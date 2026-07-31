@@ -6,7 +6,7 @@ type PlexNode = Record<string, unknown>;
 const parser = new XMLParser({
 	attributeNamePrefix: '',
 	ignoreAttributes: false,
-	parseAttributeValue: true,
+	parseAttributeValue: false, // Keep all attribute values as strings; we coerce to numbers/booleans explicitly.
 });
 
 function getPlexConfig() {
@@ -177,9 +177,10 @@ function parseAlbum(node: PlexNode): PlexAlbum {
 	const artistId = asString(node.parentRatingKey) ?? asString(node.grandparentRatingKey);
 	const artistName = asText(node.parentTitle) ?? asText(node.grandparentTitle);
 
-	if (!id || !title || !artistId || !artistName) {
-		throw new Error('Encountered an invalid Plex album record.');
-	}
+	if (!id) throw new Error(`Album node missing ratingKey (got: ${JSON.stringify(node.ratingKey)})`);
+	if (!title) throw new Error(`Album node missing title (got: ${JSON.stringify(node.title)})`);
+	if (!artistId) throw new Error(`Album "${title}" missing parentRatingKey/grandparentRatingKey (got: ${JSON.stringify(node.parentRatingKey)}, ${JSON.stringify(node.grandparentRatingKey)})`);
+	if (!artistName) throw new Error(`Album "${title}" missing parentTitle/grandparentTitle (got: ${JSON.stringify(node.parentTitle)}, ${JSON.stringify(node.grandparentTitle)})`);
 
 	return {
 		id,
@@ -197,14 +198,14 @@ function parseAlbum(node: PlexNode): PlexAlbum {
 }
 
 /**
- * Like parseAlbum, but returns null for nodes that are missing required fields
- * (e.g. non-album children such as playlists or loose tracks) instead of throwing.
+ * Like parseAlbum, but returns {album, error} — never throws.
+ * The error message is surfaced in the diagnostic when all nodes fail.
  */
-function safeParseAlbum(node: PlexNode): PlexAlbum | null {
+function safeParseAlbum(node: PlexNode): { album: PlexAlbum; error?: never } | { album?: never; error: string } {
 	try {
-		return parseAlbum(node);
-	} catch {
-		return null;
+		return { album: parseAlbum(node) };
+	} catch (err) {
+		return { error: err instanceof Error ? err.message : String(err) };
 	}
 }
 
@@ -361,15 +362,17 @@ export async function getArtistAlbums(
 	const { nodes, sourceKey } = collectAlbumCandidateNodes(container);
 
 	const albums: PlexAlbum[] = [];
+	const parseErrors: string[] = [];
 	let skippedCount = 0;
 
 	for (const node of nodes) {
-		const album = safeParseAlbum(withContainerFallbacks(node, containerWithArtistFallback));
+		const result = safeParseAlbum(withContainerFallbacks(node, containerWithArtistFallback));
 
-		if (album) {
-			albums.push(album);
+		if (result.album) {
+			albums.push(result.album);
 		} else {
 			skippedCount += 1;
+			parseErrors.push(result.error);
 		}
 	}
 
@@ -380,10 +383,11 @@ export async function getArtistAlbums(
 
 	if (albums.length === 0) {
 		const containerKeys = Object.keys(container).join(', ') || '(empty)';
+		const firstError = parseErrors[0] ? ` First error: "${parseErrors[0]}"` : '';
 		const diagnosticMessage =
 			skippedCount > 0
-				? `Artist ${artistId}: Plex returned ${skippedCount} child node(s) under key "${sourceKey}" but none could be parsed as albums. Container keys: [${containerKeys}].`
-				: `Artist ${artistId}: Plex returned no recognisable child nodes. Container keys: [${containerKeys}].`;
+				? `Artist ${artistId}: ${skippedCount} node(s) found under "${sourceKey}" but none parsed.${firstError} Container keys: [${containerKeys}]`
+				: `Artist ${artistId}: Plex returned no recognisable child nodes. Container keys: [${containerKeys}]`;
 
 		return { albums, skippedCount, diagnosticMessage };
 	}
